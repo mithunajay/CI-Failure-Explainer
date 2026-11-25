@@ -141,6 +141,74 @@ def authenticate(session: Session, username: str, password: str) -> dict | None:
     }
 
 
+def begin_login(
+    session: Session,
+    username: str,
+    password: str,
+    secret: str,
+    email_sender=send_otp_email,
+) -> tuple[dict | None, bool]:
+    user = authenticate(session, username, password)
+    if user is None:
+        return user, False
+    record = session.get(User, user["id"])
+    if record and record.role == "admin":
+        if record.otp_purpose == "login":
+            _clear_otp(record)
+            session.commit()
+        return user, False
+    if not record or not record.email or not record.email_verified:
+        return None, False
+    if not _issue_otp(session, record, "login", secret, email_sender):
+        raise RuntimeError("Wait 60 seconds before requesting another sign-in code.")
+    return user, True
+
+
+def verify_login_otp(
+    session: Session, user_id: int, code: str, secret: str
+) -> dict | None:
+    record = session.get(User, user_id)
+    if (
+        not record
+        or not record.active
+        or record.role != "user"
+        or not record.email_verified
+    ):
+        return None
+    verified = _check_otp(session, record.email or "", code, "login", secret)
+    if not verified:
+        return None
+    user = {
+        "id": verified.id,
+        "username": verified.username,
+        "role": verified.role,
+    }
+    _clear_otp(verified)
+    session.commit()
+    return user
+
+
+def resend_login_otp(
+    session: Session, user_id: int, secret: str, email_sender=send_otp_email
+) -> bool:
+    record = session.get(User, user_id)
+    if (
+        not record
+        or not record.active
+        or record.role != "user"
+        or not record.email_verified
+    ):
+        return False
+    return _issue_otp(session, record, "login", secret, email_sender)
+
+
+def mask_email(email: str) -> str:
+    local, separator, domain = email.partition("@")
+    if not separator:
+        return "your verified email"
+    return f"{local[:1]}***@{domain}"
+
+
 def change_password(
     session: Session, user_id: int, current_password: str, new_password: str
 ) -> bool:

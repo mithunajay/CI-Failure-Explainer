@@ -112,11 +112,13 @@ email/OTP columns automatically. Keep `.env` private.
 
 Users can create accounts with a username, email and password; they must verify their email with a
 10-minute OTP before signing in. The admin can also create accounts and send their email a verification
-code. Password recovery sends a 10-minute, single-use OTP to the verified email. OTPs are hashed,
-limited to five attempts, and resend requests are throttled. Recovery responses do not reveal whether
-an email address is registered. Users see only their own saved analyses; the admin can view all users'
-analyses. Passwords are stored as salted hashes. Logs are cleaned and redacted before their excerpt is
-saved, though pattern-based redaction cannot guarantee removal of every secret.
+code. Regular user accounts must also enter a 10-minute email OTP on every sign-in. The master/admin
+account signs in with its password only. Password recovery sends a 10-minute, single-use OTP to the
+verified email. OTPs are hashed, limited to five attempts, and resend
+requests are throttled. Recovery responses do not reveal whether an email address is registered. Users
+see only their own saved analyses; the admin can view all users' analyses. Passwords are stored as
+salted hashes. Logs are cleaned and redacted before their excerpt is saved, though pattern-based
+redaction cannot guarantee removal of every secret.
 
 Set `ANTHROPIC_API_KEY` in `.env`, or enter the key in the UI sidebar for this app session. In the
 sidebar, you can also change the Anthropic model, maximum response tokens, and maximum log size. The

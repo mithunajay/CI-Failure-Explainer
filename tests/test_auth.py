@@ -5,15 +5,18 @@ from sqlalchemy.orm import Session
 
 from ci_explainer.auth import (
     authenticate,
+    begin_login,
     change_password,
     create_account,
     ensure_bootstrap_admin,
     request_email_verification,
     request_password_reset,
+    resend_login_otp,
     reset_password_with_otp,
     set_account_active,
     verify_password,
     verify_email_otp,
+    verify_login_otp,
 )
 from ci_explainer.database import Base, User
 
@@ -89,6 +92,89 @@ class AuthTests(unittest.TestCase):
         self.assertIsNone(
             authenticate(self.session, "engineer", "another long password")
         )
+
+    def test_admin_password_signs_in_without_email_otp(self):
+        admin_id = create_account(
+            self.session,
+            "master",
+            "a sufficiently long password",
+            "master@example.com",
+            role="admin",
+            email_verified=True,
+        )
+        sent = []
+        user, otp_required = begin_login(
+            self.session,
+            "master",
+            "a sufficiently long password",
+            "m" * 40,
+            lambda email, code, purpose: sent.append((email, code, purpose)),
+        )
+        self.assertEqual(user["id"], admin_id)
+        self.assertFalse(otp_required)
+        self.assertEqual(sent, [])
+
+    def test_regular_user_password_requires_email_otp_before_sign_in(self):
+        user_id = create_account(
+            self.session,
+            "engineer",
+            "a sufficiently long password",
+            "engineer@example.com",
+            email_verified=True,
+        )
+        sent = []
+        user, otp_required = begin_login(
+            self.session,
+            "engineer",
+            "a sufficiently long password",
+            "n" * 40,
+            lambda email, code, purpose: sent.append((email, code, purpose)),
+        )
+        self.assertEqual(user["id"], user_id)
+        self.assertTrue(otp_required)
+        self.assertEqual(sent[0][0], "engineer@example.com")
+        self.assertEqual(sent[0][2], "login")
+        wrong_code = f"{(int(sent[0][1]) + 1) % 1_000_000:06d}"
+        self.assertIsNone(
+            verify_login_otp(self.session, user_id, wrong_code, "n" * 40)
+        )
+        verified = verify_login_otp(
+            self.session, user_id, sent[0][1], "n" * 40
+        )
+        self.assertEqual(verified["role"], "user")
+        self.assertIsNone(
+            verify_login_otp(self.session, user_id, sent[0][1], "n" * 40)
+        )
+
+    def test_regular_user_login_otp_resend_is_throttled(self):
+        user_id = create_account(
+            self.session,
+            "engineer",
+            "a sufficiently long password",
+            "engineer@example.com",
+            email_verified=True,
+        )
+        sent = []
+        self.assertTrue(resend_login_otp(
+            self.session, user_id, "p" * 40,
+            lambda email, code, purpose: sent.append(code),
+        ))
+        self.assertFalse(resend_login_otp(
+            self.session, user_id, "p" * 40,
+            lambda email, code, purpose: sent.append(code),
+        ))
+        self.assertEqual(len(sent), 1)
+
+    def test_admin_account_does_not_get_a_sign_in_otp(self):
+        admin_id = create_account(
+            self.session,
+            "master",
+            "a sufficiently long password",
+            "master@example.com",
+            role="admin",
+            email_verified=True,
+        )
+        self.assertFalse(resend_login_otp(self.session, admin_id, "p" * 40))
 
     def test_password_change_checks_current_password(self):
         user_id = create_account(

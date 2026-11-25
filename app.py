@@ -15,15 +15,19 @@ from sqlalchemy.orm import Session
 
 from ci_explainer.auth import (
     authenticate,
+    begin_login,
     change_password,
     create_account,
     ensure_bootstrap_admin,
+    mask_email,
     request_email_verification,
     request_password_reset,
+    resend_login_otp,
     reset_password_with_otp,
     reset_password,
     set_account_active,
     verify_email_otp,
+    verify_login_otp,
 )
 from ci_explainer.database import (
     User,
@@ -102,21 +106,82 @@ def show_login(session: Session) -> bool:
             password = st.text_input("Password", type="password")
             submitted = st.form_submit_button("Log in", type="primary")
         if submitted:
+            user = None
+            otp_required = False
+            login_error = None
             try:
-                user = authenticate(session, username, password)
+                user, otp_required = begin_login(
+                    session,
+                    username,
+                    password,
+                    os.environ.get("APP_OTP_SECRET", ""),
+                )
             except SQLAlchemyError:
                 session.rollback()
                 st.error("Could not verify the account. Check the MySQL connection.")
                 return False
-            if user is None:
-                st.error(
-                    "Sign-in failed. Check your username/password and confirm your email is verified."
+            except RuntimeError as error:
+                login_error = str(error)
+            if login_error:
+                st.error(login_error)
+            elif user is None:
+                if not otp_required:
+                    st.error(
+                        "Sign-in failed. Check your username/password and confirm your email is verified."
+                    )
+            elif otp_required:
+                st.session_state["pending_login_id"] = user["id"]
+                st.session_state["pending_login_username"] = user["username"]
+                record = session.get(User, user["id"])
+                st.session_state["pending_login_email"] = mask_email(record.email or "")
+                st.success(
+                    f"Verification code sent to "
+                    f"{st.session_state['pending_login_email']}."
                 )
             else:
                 st.session_state["auth_user"] = user
                 st.rerun()
 
     otp_secret = os.environ.get("APP_OTP_SECRET", "")
+    pending_login_id = st.session_state.get("pending_login_id")
+    if pending_login_id:
+        st.markdown("**Verify sign-in**")
+        st.caption(
+            "Enter the one-time code sent to "
+            f"{st.session_state.get('pending_login_email', 'your verified email')}. "
+            "The code expires in 10 minutes."
+        )
+        with st.form("login_otp_form"):
+            login_code = st.text_input("Six-digit sign-in code", max_chars=6)
+            verify_login = st.form_submit_button("Verify and sign in", type="primary")
+        if verify_login:
+            try:
+                user = verify_login_otp(
+                    session, pending_login_id, login_code.strip(), otp_secret
+                )
+            except (RuntimeError, SQLAlchemyError) as error:
+                session.rollback()
+                st.error(f"Could not verify sign-in: {error}")
+            else:
+                if user:
+                    st.session_state["auth_user"] = user
+                    st.session_state.pop("pending_login_id", None)
+                    st.session_state.pop("pending_login_username", None)
+                    st.session_state.pop("pending_login_email", None)
+                    st.rerun()
+                st.error("Code is invalid, expired, or has reached its attempt limit.")
+
+        if st.button("Resend sign-in code"):
+            try:
+                sent = resend_login_otp(session, pending_login_id, otp_secret)
+                if sent:
+                    st.success("A new sign-in code was sent.")
+                else:
+                    st.info("Please wait before requesting another code.")
+            except (RuntimeError, SQLAlchemyError) as error:
+                session.rollback()
+                st.error(f"Could not send sign-in code: {error}")
+
     with signup_tab:
         st.caption("Create an account and verify your email before signing in.")
         with st.form("signup_form"):
