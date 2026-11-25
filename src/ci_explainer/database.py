@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, create_engine, select
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, create_engine, inspect, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 
 from .log_cleaner import clean_log
@@ -15,13 +15,25 @@ class Base(DeclarativeBase):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (Index("uq_users_email", "email", unique=True),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     username: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    email: Mapped[str | None] = mapped_column(String(254), nullable=True)
+    email_verified: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0")
+    )
     password_salt: Mapped[str] = mapped_column(String(32), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="user")
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    otp_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    otp_purpose: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    otp_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    otp_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    otp_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
     analyses: Mapped[list[Analysis]] = relationship(back_populates="user")
 
 
@@ -49,6 +61,28 @@ def create_database_engine(url: str):
 
 def initialize_database(engine) -> None:
     Base.metadata.create_all(engine)
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("users")}
+    additions = (
+        ("email", "VARCHAR(254) NULL"),
+        ("email_verified", "BOOLEAN NOT NULL DEFAULT 0"),
+        ("otp_hash", "VARCHAR(64) NULL"),
+        ("otp_purpose", "VARCHAR(16) NULL"),
+        ("otp_expires_at", "DATETIME NULL"),
+        ("otp_requested_at", "DATETIME NULL"),
+        ("otp_attempts", "INTEGER NOT NULL DEFAULT 0"),
+    )
+    with engine.begin() as connection:
+        for name, definition in additions:
+            if name not in columns:
+                connection.exec_driver_sql(
+                    f"ALTER TABLE users ADD COLUMN {name} {definition}"
+                )
+    indexes = {index["name"] for index in inspect(engine).get_indexes("users")}
+    if "uq_users_email" not in indexes:
+        next(index for index in User.__table__.indexes if index.name == "uq_users_email").create(
+            engine, checkfirst=True
+        )
 
 
 def save_analysis(session: Session, user: dict, raw_log: str, explanation: dict) -> int:

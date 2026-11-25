@@ -103,11 +103,20 @@ ON ci_failure_explainer.* TO 'ci_app'@'localhost';
 ```
 
 In `.env`, set `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`,
-`CI_ADMIN_USERNAME`, and a separate strong `CI_ADMIN_PASSWORD`. The app creates its tables and first
-admin account on startup. Keep `.env` private. The admin can create, disable, and reset regular user
-accounts. Users see only their own saved analyses; the admin can view all users' analyses. Passwords
-are stored as salted hashes. Logs are cleaned and redacted before their excerpt is saved, though
-pattern-based redaction cannot guarantee removal of every secret.
+`CI_ADMIN_USERNAME`, `CI_ADMIN_EMAIL`, and a separate strong `CI_ADMIN_PASSWORD`. Configure the
+`SMTP_*` settings for an email provider and set `APP_OTP_SECRET` to a random secret of at least 32
+characters. For Gmail, use `smtp.gmail.com`, port `587`, your email address as `SMTP_USERNAME` and
+`SMTP_FROM_EMAIL`, and a Google app password as `SMTP_PASSWORD` (not your regular Google password).
+The app creates its tables and first admin account on startup. Existing databases receive the new
+email/OTP columns automatically. Keep `.env` private.
+
+Users can create accounts with a username, email and password; they must verify their email with a
+10-minute OTP before signing in. The admin can also create accounts and send their email a verification
+code. Password recovery sends a 10-minute, single-use OTP to the verified email. OTPs are hashed,
+limited to five attempts, and resend requests are throttled. Recovery responses do not reveal whether
+an email address is registered. Users see only their own saved analyses; the admin can view all users'
+analyses. Passwords are stored as salted hashes. Logs are cleaned and redacted before their excerpt is
+saved, though pattern-based redaction cannot guarantee removal of every secret.
 
 Set `ANTHROPIC_API_KEY` in `.env`, or enter the key in the UI sidebar for this app session. In the
 sidebar, you can also change the Anthropic model, maximum response tokens, and maximum log size. The

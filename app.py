@@ -18,8 +18,12 @@ from ci_explainer.auth import (
     change_password,
     create_account,
     ensure_bootstrap_admin,
+    request_email_verification,
+    request_password_reset,
+    reset_password_with_otp,
     reset_password,
     set_account_active,
+    verify_email_otp,
 )
 from ci_explainer.database import (
     User,
@@ -89,23 +93,143 @@ def show_login(session: Session) -> bool:
         st.session_state.pop("auth_user", None)
         st.warning("This account is no longer active. Please sign in again.")
 
-    st.subheader("Sign in")
-    with st.form("login_form"):
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        submitted = st.form_submit_button("Log in", type="primary")
-    if submitted:
-        try:
-            user = authenticate(session, username, password)
-        except SQLAlchemyError:
-            session.rollback()
-            st.error("Could not verify the account. Check the MySQL connection.")
-            return False
-        if user is None:
-            st.error("Invalid username or password, or this account is disabled.")
-            return False
-        st.session_state["auth_user"] = user
-        st.rerun()
+    login_tab, signup_tab, recovery_tab = st.tabs(
+        ["Sign in", "Create account", "Forgot password"]
+    )
+    with login_tab:
+        with st.form("login_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Log in", type="primary")
+        if submitted:
+            try:
+                user = authenticate(session, username, password)
+            except SQLAlchemyError:
+                session.rollback()
+                st.error("Could not verify the account. Check the MySQL connection.")
+                return False
+            if user is None:
+                st.error(
+                    "Sign-in failed. Check your username/password and confirm your email is verified."
+                )
+            else:
+                st.session_state["auth_user"] = user
+                st.rerun()
+
+    otp_secret = os.environ.get("APP_OTP_SECRET", "")
+    with signup_tab:
+        st.caption("Create an account and verify your email before signing in.")
+        with st.form("signup_form"):
+            new_username = st.text_input("Choose a username")
+            new_email = st.text_input("Email address")
+            new_password = st.text_input("Choose a password (at least 12 characters)", type="password")
+            submitted = st.form_submit_button("Create account")
+        if submitted:
+            try:
+                create_account(session, new_username, new_password, new_email)
+            except ValueError as error:
+                session.rollback()
+                st.error(str(error))
+            except SQLAlchemyError:
+                session.rollback()
+                st.error("Could not create the account. Check the database connection.")
+            else:
+                st.session_state["pending_verification_email"] = new_email.strip().casefold()
+                try:
+                    request_email_verification(session, new_email, otp_secret)
+                    st.success(
+                        f"Account created. Enter the verification code sent to {new_email.strip()}."
+                    )
+                except RuntimeError as error:
+                    st.error(
+                        f"Account created, but the verification email was not sent: {error} "
+                        "Configure email and use Resend verification code."
+                    )
+
+        pending_email = st.session_state.get("pending_verification_email")
+        if pending_email:
+            st.markdown("**Verify your email**")
+            with st.form("verify_email_form"):
+                verification_code = st.text_input("Six-digit email code", max_chars=6)
+                verify = st.form_submit_button("Verify email")
+            if verify:
+                try:
+                    verified = verify_email_otp(
+                        session, pending_email, verification_code.strip(), otp_secret
+                    )
+                except RuntimeError as error:
+                    st.error(str(error))
+                else:
+                    if verified:
+                        st.session_state.pop("pending_verification_email", None)
+                        st.success("Email verified. You can now sign in.")
+                    else:
+                        st.error("Code is invalid, expired, or has reached its attempt limit.")
+            if st.button("Resend verification code"):
+                try:
+                    sent = request_email_verification(session, pending_email, otp_secret)
+                    if sent:
+                        st.success("A new verification code was sent.")
+                    else:
+                        st.info("Please wait before requesting another code.")
+                except RuntimeError as error:
+                    st.error(str(error))
+
+        with st.form("resend_verification_form"):
+            resend_email = st.text_input("Resend verification code to email")
+            resend = st.form_submit_button("Send verification code")
+        if resend:
+            try:
+                request_email_verification(session, resend_email, otp_secret)
+            except RuntimeError as error:
+                st.error(str(error))
+            else:
+                st.info(
+                    "If that address belongs to an active unverified account, "
+                    "a code has been emailed."
+                )
+
+    with recovery_tab:
+        st.caption("We send a short-lived code only if the address belongs to a verified account.")
+        with st.form("request_reset_form"):
+            reset_email = st.text_input("Account email address")
+            request_reset = st.form_submit_button("Send recovery code")
+        if request_reset:
+            st.session_state["pending_reset_email"] = reset_email.strip().casefold()
+            try:
+                request_password_reset(session, reset_email, otp_secret)
+            except RuntimeError as error:
+                st.error(str(error))
+            else:
+                st.info(
+                    "If that address belongs to an active verified account, a code has been emailed."
+                )
+
+        pending_reset_email = st.session_state.get("pending_reset_email")
+        if pending_reset_email:
+            with st.form("complete_reset_form"):
+                recovery_code = st.text_input("Six-digit recovery code", max_chars=6)
+                replacement_password = st.text_input(
+                    "New password (at least 12 characters)", type="password"
+                )
+                finish_reset = st.form_submit_button("Reset password")
+            if finish_reset:
+                try:
+                    changed = reset_password_with_otp(
+                        session,
+                        pending_reset_email,
+                        recovery_code.strip(),
+                        replacement_password,
+                        otp_secret,
+                    )
+                except (RuntimeError, ValueError) as error:
+                    st.error(str(error))
+                else:
+                    if changed:
+                        st.session_state.pop("pending_reset_email", None)
+                        st.success("Password reset. You can now sign in.")
+                    else:
+                        st.error("Code is invalid, expired, or has reached its attempt limit.")
     return False
 
 
@@ -220,14 +344,31 @@ def show_admin_tab(user: dict, session: Session) -> None:
     st.subheader("Create a user account")
     with st.form("create_user_form"):
         username = st.text_input("New username")
+        email = st.text_input("User email address")
         password = st.text_input("Temporary password (at least 12 characters)", type="password")
         submitted = st.form_submit_button("Create user")
     if submitted:
         try:
-            create_account(session, username, password)
-            st.success(f"Account created for {username.strip()}. Share the temporary password securely.")
+            create_account(session, username, password, email)
+            sent = request_email_verification(
+                session, email, os.environ.get("APP_OTP_SECRET", "")
+            )
+            if sent:
+                st.success(
+                    f"Account created and a verification code sent to {email.strip()}. "
+                    "Share the temporary password securely."
+                )
+            else:
+                st.info(
+                    "Account created. A verification email may already be pending; "
+                    "ask the user to request a new code from Create account."
+                )
         except ValueError as error:
             st.error(str(error))
+        except RuntimeError as error:
+            st.error(
+                f"Account was created but the verification email was not sent: {error}"
+            )
         except SQLAlchemyError:
             session.rollback()
             st.error("Could not create the account. Check the MySQL connection.")
@@ -249,6 +390,19 @@ def show_admin_tab(user: dict, session: Session) -> None:
                     st.error("Account is no longer active.")
             except ValueError as error:
                 st.error(str(error))
+        if not selected.email_verified and st.button(
+            "Send email verification code", key=f"verify_{selected.id}"
+        ):
+            try:
+                sent = request_email_verification(
+                    session, selected.email or "", os.environ.get("APP_OTP_SECRET", "")
+                )
+                if sent:
+                    st.success("Verification code sent.")
+                else:
+                    st.info("Please wait before requesting another code.")
+            except RuntimeError as error:
+                st.error(str(error))
         action = "Disable account" if selected.active else "Enable account"
         if st.button(action, key=f"toggle_{selected.id}"):
             try:
@@ -262,7 +416,13 @@ def show_admin_tab(user: dict, session: Session) -> None:
     st.subheader("All user accounts")
     st.dataframe(
         [
-            {"Username": a.username, "Role": a.role, "Active": a.active}
+            {
+                "Username": a.username,
+                "Email": a.email or "",
+                "Email verified": a.email_verified,
+                "Role": a.role,
+                "Active": a.active,
+            }
             for a in accounts
         ],
         use_container_width=True,
@@ -313,10 +473,11 @@ def main() -> None:
                 session,
                 os.environ.get("CI_ADMIN_USERNAME", ""),
                 os.environ.get("CI_ADMIN_PASSWORD", ""),
+                os.environ.get("CI_ADMIN_EMAIL", ""),
             ):
                 st.error(
-                    "No admin account exists. Set CI_ADMIN_USERNAME and "
-                    "CI_ADMIN_PASSWORD in .env, then restart."
+                    "Admin email is missing or unverified. Set CI_ADMIN_EMAIL, "
+                    "CI_ADMIN_USERNAME, and CI_ADMIN_PASSWORD in .env, then restart."
                 )
                 return
             if not show_login(session):
