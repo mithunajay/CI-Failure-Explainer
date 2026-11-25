@@ -1,0 +1,4 @@
+# The core tool has no runtime dependencies (standard library only).
+# Install the LLM client only if you want to call a model:
+anthropic>=0.40
+pytest>=7

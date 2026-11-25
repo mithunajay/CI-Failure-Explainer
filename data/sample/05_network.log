@@ -1,0 +1,3 @@
+2026-03-05T11:20:00.000Z Run curl -fsSL https://registry.example.com/pkg.tar.gz -o pkg.tar.gz
+2026-03-05T11:20:05.000Z curl: (6) Could not resolve host: registry.example.com
+2026-03-05T11:20:05.000Z ##[error]Process completed with exit code 6.

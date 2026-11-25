@@ -1,0 +1,32 @@
+# Example GitHub Actions workflow (copy to .github/workflows/ in YOUR repo to use it).
+# It drafts an explanation into the run summary. It never comments or pushes;
+# a person reads it. Do not run this on logs from untrusted forks with secrets.
+name: explain-ci-failure
+
+on:
+  workflow_run:
+    workflows: ["tests"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  explain:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "ci-failure-explainer[anthropic] @ git+https://github.com/mithunajay/ci-failure-explainer.git"
+      - name: Fetch and explain
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          ci-explainer fetch-github --repo "${{ github.repository }}" --limit 1 --out raw
+          for f in raw/*.log; do
+            ci-explainer explain "$f" >> "$GITHUB_STEP_SUMMARY"
+          done

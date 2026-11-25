@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+# Local working data (keep sample data, ignore your own downloads and results)
+data/raw/
+data/results/
+data/queue.jsonl
+data/reviews.jsonl

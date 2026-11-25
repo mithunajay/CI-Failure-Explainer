@@ -1,0 +1,5 @@
+2026-03-01T10:00:01.000Z ##[group]Run pip install -r requirements.txt
+2026-03-01T10:00:03.000Z Collecting fastapi==9.9.9
+2026-03-01T10:00:04.000Z ERROR: Could not find a version that satisfies the requirement fastapi==9.9.9 (from versions: 0.1.0, 0.110.0)
+2026-03-01T10:00:04.000Z ERROR: No matching distribution found for fastapi==9.9.9
+2026-03-01T10:00:04.000Z ##[error]Process completed with exit code 1.

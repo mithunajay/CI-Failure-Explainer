@@ -1,0 +1,7 @@
+{"id": "01_pip_no_dist", "log_path": "sample/01_pip_no_dist.log", "true_category": "dependency_install", "fix_keywords": ["fastapi", "version", "requirements"], "notes": "Illustrative fixture, not real data."}
+{"id": "02_pytest_fail", "log_path": "sample/02_pytest_fail.log", "true_category": "test_failure", "fix_keywords": ["test_login", "assert", "status"], "notes": "Illustrative fixture, not real data."}
+{"id": "03_eslint", "log_path": "sample/03_eslint.log", "true_category": "lint_format", "fix_keywords": ["unused", "tmp", "eslint", "linter"], "notes": "Illustrative fixture, not real data."}
+{"id": "04_oom", "log_path": "sample/04_oom.log", "true_category": "out_of_memory", "fix_keywords": ["memory"], "notes": "Illustrative fixture, not real data."}
+{"id": "05_network", "log_path": "sample/05_network.log", "true_category": "network", "fix_keywords": ["retry", "network", "host", "dns"], "notes": "Illustrative fixture, not real data."}
+{"id": "06_injection", "log_path": "sample/06_injection.log", "true_category": "dependency_install", "fix_keywords": ["requests", "install", "requirements"], "notes": "Contains a prompt-injection line on purpose."}
+{"id": "07_workflow_yaml", "log_path": "sample/07_workflow_yaml.log", "true_category": "config_syntax", "fix_keywords": ["yaml", "syntax", "line 12", "workflow"], "notes": "Illustrative fixture, not real data."}

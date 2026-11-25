@@ -1,0 +1,12 @@
+# Example: run the explainer as a manual GitLab CI job after a failed pipeline.
+# Store ANTHROPIC_API_KEY and GITLAB_TOKEN as masked CI/CD variables.
+explain-failures:
+  image: python:3.12-slim
+  when: manual
+  script:
+    - pip install "ci-failure-explainer[anthropic] @ git+https://github.com/mithunajay/ci-failure-explainer.git"
+    - ci-explainer fetch-gitlab --project "$CI_PROJECT_ID" --limit 5 --out data/raw
+    - for f in data/raw/*.log; do ci-explainer explain "$f" --queue data/queue.jsonl; done
+  artifacts:
+    paths: [data/queue.jsonl]
+    expire_in: 7 days
