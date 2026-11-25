@@ -13,7 +13,8 @@ dependencies = []
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.40"]
-dev = ["pytest>=7"]
+web = ["streamlit>=1.40", "python-dotenv>=1.0", "anthropic>=0.40", "SQLAlchemy>=2.0", "mysql-connector-python>=9.0"]
+dev = ["pytest>=7", "SQLAlchemy>=2.0"]
 
 [project.scripts]
 ci-explainer = "ci_explainer.cli:main"

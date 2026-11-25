@@ -44,6 +44,10 @@ raw log ──► clean ──► rules (baseline) ──┐
 | Guardrails | `guardrails.py` | Injection detection, untrusted-data wrapping, output validation |
 | LLM client | `llm.py` | Anthropic client behind a small interface; fake client for tests |
 | Pipeline | `explainer.py` | Ties it together |
+| Authentication | `auth.py` | Salted password hashes, admin bootstrap, and account management |
+| Database | `database.py` | MySQL tables and private, redacted analysis history |
+| Web backend | `web_backend.py` | Validates UI input and calls the shared explanation pipeline |
+| Web UI | `app.py` | Local Streamlit interface with login, history, and admin tools |
 | Review queue | `review.py` | Human approval, edits, rejection, approval-rate stats |
 | Sources | `github_source.py`, `gitlab_source.py` | Download failed job logs |
 | Evaluation | `evaluation.py` | Accuracy, fix match, fallback rate, latency, cost; model comparison |
@@ -56,7 +60,7 @@ cd ci-failure-explainer
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -e ".[dev,anthropic]"
 cp .env.example .env                                    # then fill in keys; export them (see below)
-pytest -q                                               # 41 tests, no API key needed
+pytest -q                                               # tests do not require API keys or MySQL
 ```
 
 Try it with no API key (rules only):
@@ -75,6 +79,60 @@ ci-explainer review                      # approve / edit / reject
 
 `data/sample/06_injection.log` contains a line that tries to hijack an AI assistant. The tool flags it,
 keeps the log inside untrusted delimiters, and rejects any reply that leaks secrets or quotes lines not in the log.
+
+## Local web UI
+
+The browser UI uses the same explanation pipeline and guardrails as the CLI. From the project folder in
+PowerShell:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[web,dev]"
+Copy-Item .env.example .env
+```
+
+For local login and history, install and start **MySQL Server** on this computer. Create the database
+and a limited app user in MySQL Workbench or the MySQL command line:
+
+```sql
+CREATE DATABASE ci_failure_explainer CHARACTER SET utf8mb4;
+CREATE USER 'ci_app'@'localhost' IDENTIFIED BY 'replace-with-a-strong-password';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, INDEX, ALTER, REFERENCES
+ON ci_failure_explainer.* TO 'ci_app'@'localhost';
+```
+
+In `.env`, set `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`,
+`CI_ADMIN_USERNAME`, and a separate strong `CI_ADMIN_PASSWORD`. The app creates its tables and first
+admin account on startup. Keep `.env` private. The admin can create, disable, and reset regular user
+accounts. Users see only their own saved analyses; the admin can view all users' analyses. Passwords
+are stored as salted hashes. Logs are cleaned and redacted before their excerpt is saved, though
+pattern-based redaction cannot guarantee removal of every secret.
+
+Set `ANTHROPIC_API_KEY` in `.env`, or enter the key in the UI sidebar for this app session. In the
+sidebar, you can also change the Anthropic model, maximum response tokens, and maximum log size. The
+log-size limit applies to pasted and uploaded logs; the default is 10 MB. The key field is masked and
+the app does not write it to project files. Then start the app:
+
+```powershell
+python -m streamlit run app.py --server.address 127.0.0.1
+```
+
+Open the localhost address printed in the terminal. Without an API key, select **Rules only**; with a key,
+the app defaults to the configured Anthropic model. The sidebar settings can be changed before each
+analysis. Uploaded logs and explanations are kept in the local browser session and are not automatically
+posted; saved analysis excerpts are stored in MySQL. Keep the server bound to localhost while testing.
+This local setup is not production-hardened; do not expose it to the internet.
+
+### Debug in VS Code
+
+1. Open this project folder in VS Code and install dependencies with `python -m pip install -e ".[web,dev]"`.
+2. Set the MySQL and admin variables in `.env`; do not commit that file.
+3. Open **Run and Debug**, select **CI Failure Explainer (Streamlit)**, and press **F5**.
+4. Open the localhost URL printed in the **Debug Console** or terminal. Add breakpoints in `app.py`,
+   `src/ci_explainer/auth.py`, or `src/ci_explainer/database.py`.
+
+The same app can be started without the debugger using `python -m streamlit run app.py --server.address 127.0.0.1`.
 
 ## Commands
 
@@ -131,6 +189,8 @@ The evaluation shows where each one wins.
 ## Project layout
 
 ```
+app.py               local Streamlit web UI
+.vscode/             VS Code F5 debug configuration
 src/ci_explainer/   package code
 tests/              unit tests (run with pytest)
 data/sample/        illustrative fixture logs

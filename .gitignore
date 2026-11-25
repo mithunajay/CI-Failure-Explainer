@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 venv/
 .env
+setup_mysql.sql
 *.egg-info/
 .pytest_cache/
 build/
